@@ -36,12 +36,10 @@ def processar_dades(archivo_principal_bytes, archivo_pestana_bytes, hojas_selecc
     lista_df = []
     xls = pd.ExcelFile(io.BytesIO(archivo_pestana_bytes))
     
-    # Llegim les pestañes i calculem la fila real DINS de cada pestaña abans de juntar-les
     for nombre_hoja in xls.sheet_names:
         if nombre_hoja in hojas_seleccionadas:
             df_hoja = pd.read_excel(xls, sheet_name=nombre_hoja)
             df_hoja['Origen_Pestana'] = nombre_hoja
-            # Índex + 2 per compensar la capçalera i que comenci a la fila 2 d'Excel
             df_hoja['Fila_Excel'] = df_hoja.index + 2 
             lista_df.append(df_hoja)
             
@@ -58,8 +56,8 @@ def processar_dades(archivo_principal_bytes, archivo_pestana_bytes, hojas_selecc
     df_principal['Importe_Limpio'] = pd.to_numeric(df_principal['Importe_Str'], errors='coerce').map(lambda x: f"{x:.2f}" if pd.notnull(x) else "SENSE_IMPORT")
     df_pestana['Concepte_Check'] = df_pestana[COL_CONCEPTE_PEST].fillna('').astype(str).str.upper().str.strip()
 
-    # Cerca
-    def check_estado(row, df_prin):
+    # Cerca 1: Pestanyes -> Principal
+    def check_pestana_en_principal(row, df_prin):
         nombre_pest = row['Nombre_Match']
         cand_fecha_imp = df_prin[(df_prin['Fecha_Limpia'] == row['Fecha_Limpia']) & (df_prin['Importe_Limpio'] == row['Importe_Limpio'])]
         if not cand_fecha_imp.empty:
@@ -70,7 +68,24 @@ def processar_dades(archivo_principal_bytes, archivo_pestana_bytes, hojas_selecc
             return 'FALTA'
         return 'FALTA'
 
-    df_pestana['Estat_al_Principal'] = df_pestana.apply(lambda row: check_estado(row, df_principal), axis=1)
+    df_pestana['Estat_al_Principal'] = df_pestana.apply(lambda row: check_pestana_en_principal(row, df_principal), axis=1)
+    
+    # Cerca 2: Principal -> Pestanyes 
+    def check_principal_en_pestanyes(row, df_pest):
+        nombre_prin = row['Nombre_Match']
+        cand_fecha_imp = df_pest[(df_pest['Fecha_Limpia'] == row['Fecha_Limpia']) & (df_pest['Importe_Limpio'] == row['Importe_Limpio'])]
+        if not cand_fecha_imp.empty:
+            for _, row_pest in cand_fecha_imp.iterrows():
+                nombre_pest = row_pest['Nombre_Match']
+                if nombre_prin != "" and nombre_pest != "" and (nombre_prin in nombre_pest or nombre_pest in nombre_prin):
+                    return 'TROBAT'
+            return 'FALTA'
+        return 'FALTA'
+
+    df_principal['Estat_a_Pestanes'] = df_principal.apply(lambda row: check_principal_en_pestanyes(row, df_pestana), axis=1)
+    df_principal['Fila_Excel'] = df_principal.index + 2 
+
+    # Comprovacions de qualitat
     df_pestana['Es_Repetit'] = df_pestana.duplicated(subset=['Fecha_Limpia', 'Importe_Limpio', 'Nombre_Match', 'Concepte_Check'], keep=False).map({True: 'SI REPETIT', False: 'NO'})
     df_pestana['Factura_Check'] = df_pestana[COL_FACTURA_PEST].fillna('').astype(str).str.strip()
     df_pestana['Rebut_Check'] = df_pestana[COL_REBUT_PEST].fillna('').astype(str).str.strip()
@@ -78,7 +93,13 @@ def processar_dades(archivo_principal_bytes, archivo_pestana_bytes, hojas_selecc
     mask_no_doc = (df_pestana['Factura_Check'] == '') & (df_pestana['Rebut_Check'] == '')
     df_pestana.loc[mask_no_doc, 'Estat_Documentacio'] = 'FALTA FACTURA I REBUT'
 
-    return df_principal, df_pestana
+    # Separar resultats
+    df_faltan_pest = df_pestana[df_pestana['Estat_al_Principal'] == 'FALTA'].copy()
+    df_faltan_prin = df_principal[df_principal['Estat_a_Pestanes'] == 'FALTA'].copy()
+    df_repetidos = df_pestana[df_pestana['Es_Repetit'] == 'SI REPETIT'].copy()
+    df_falta_doc = df_pestana[df_pestana['Estat_Documentacio'] == 'FALTA FACTURA I REBUT'].copy()
+
+    return df_principal, df_pestana, df_faltan_prin, df_faltan_pest, df_repetidos, df_falta_doc
 
 def apply_excel_formatting(original_file_bytes, output_df_bytes, num_original_cols):
     try:
@@ -133,99 +154,143 @@ if archivo_principal and archivo_pestana and hojas_seleccionadas:
     
     if st.sidebar.button("Iniciar Comparació", type="primary"):
         with st.spinner("Processant i creuant dades..."):
-            df_principal, df_pestana = processar_dades(archivo_principal.getvalue(), archivo_pestana.getvalue(), hojas_seleccionadas)
+            df_principal, df_pestana, df_faltan_prin, df_faltan_pest, df_repetidos, df_falta_doc = processar_dades(archivo_principal.getvalue(), archivo_pestana.getvalue(), hojas_seleccionadas)
 
-            df_faltan = df_pestana[df_pestana['Estat_al_Principal'] == 'FALTA'].copy()
-            # JA NO FEM insert(0, 'Fila_Excel') aquí, ja es calcula a la funció
-            df_repetidos = df_pestana[df_pestana['Es_Repetit'] == 'SI REPETIT'].copy()
-            df_falta_doc = df_pestana[df_pestana['Estat_Documentacio'] == 'FALTA FACTURA I REBUT'].copy()
-
-            cols_tec = ['Fecha_Limpia', 'Nombre_Match', 'Importe_Str', 'Importe_Limpio', 'Factura_Check', 'Rebut_Check', 'Concepte_Check']
+            cols_tec = ['Fecha_Limpia', 'Nombre_Match', 'Importe_Str', 'Importe_Limpio', 'Factura_Check', 'Rebut_Check', 'Concepte_Check', 'Estat_a_Pestanes', 'Estat_al_Principal']
             cols_ocult = ['INCIDÈNCIES SECRETARIA', 'INCIDÈNCIES RECEPCIÓ MOSTRES', 'INCIDÈNCIES']
             num_original_cols = len(pd.read_excel(archivo_pestana, sheet_name=hojas_seleccionadas[0], nrows=0).columns)
             
             raw_output = io.BytesIO()
             with pd.ExcelWriter(raw_output, engine='openpyxl') as writer:
                 df_pestana.drop(columns=cols_tec, errors='ignore').to_excel(writer, sheet_name='Tot_Creuat', index=False)
-                df_faltan.drop(columns=cols_tec + cols_ocult, errors='ignore').to_excel(writer, sheet_name='Falten_al_Principal', index=False)
+                df_faltan_pest.drop(columns=cols_tec + cols_ocult, errors='ignore').to_excel(writer, sheet_name='Falten_Pestanyes_al_Principal', index=False)
+                df_faltan_prin.drop(columns=cols_tec, errors='ignore').to_excel(writer, sheet_name='Falten_Principal_a_Pestanyes', index=False)
                 df_repetidos.drop(columns=cols_tec, errors='ignore').to_excel(writer, sheet_name='Repetits_a_Pestanyes', index=False)
                 df_falta_doc.drop(columns=cols_tec, errors='ignore').to_excel(writer, sheet_name='Falta_Documentacio', index=False)
             raw_output.seek(0)
             final_output = apply_excel_formatting(archivo_pestana.getvalue(), raw_output.getvalue(), num_original_cols)
 
             st.session_state['resultats'] = {
-                'df_faltan': df_faltan, 'df_repetidos': df_repetidos, 'df_falta_doc': df_falta_doc,
-                'df_principal': df_principal, 'final_output': final_output,
+                'df_principal': df_principal, 'df_pestana': df_pestana,
+                'df_faltan_prin': df_faltan_prin, 'df_faltan_pest': df_faltan_pest,
+                'df_repetidos': df_repetidos, 'df_falta_doc': df_falta_doc,
+                'final_output': final_output,
                 'cols_tec': cols_tec, 'cols_ocult': cols_ocult
             }
 
     if 'resultats' in st.session_state:
         res = st.session_state['resultats']
-        df_faltan = res['df_faltan']
+        df_principal = res['df_principal']
+        df_pestana = res['df_pestana']
+        df_faltan_prin = res['df_faltan_prin']
+        df_faltan_pest = res['df_faltan_pest']
         df_repetidos = res['df_repetidos']
         df_falta_doc = res['df_falta_doc']
-        df_principal = res['df_principal']
         
         st.success("Procés finalitzat amb èxit.")
-        col1, col2, col3 = st.columns(3)
-        col1.metric("FALTEN", len(df_faltan))
-        col2.metric("REPETITS", len(df_repetidos))
-        col3.metric("Falta FACTURA/REBUT", len(df_falta_doc))
+        col1, col2, col3, col4 = st.columns(4)
+        col1.metric("FALTEN Cobraments", len(df_faltan_prin))
+        col2.metric("FALTEN Ingressos", len(df_faltan_pest))
+        col3.metric("REPETITS", len(df_repetidos))
+        col4.metric("Falta FACT/REBUT", len(df_falta_doc))
 
         st.download_button("Descarregar Excel de Resultats", data=res['final_output'], file_name="Comparacio_Resultat.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        # 1. FALTANTS PRINCIPAL -> PESTANYES
+        with st.expander("Revisar FALTEN (Estan a Ingressos però no a Cobraments)", expanded=False):
+            if df_faltan_prin.empty:
+                st.info("Tots els cobraments de Ingressos estan registrats al Listat de Cobraments.")
+            else:
+                cols_amagar_prin_pantalla = res['cols_tec'] + ['Estat_a_Pestanes']
+                df_faltan_prin_pantalla = df_faltan_prin.drop(columns=cols_amagar_prin_pantalla, errors='ignore')
+                st.dataframe(df_faltan_prin_pantalla, use_container_width=True, hide_index=True)
+                
+                # DESPLEGABLE INTERN PARA COMPARAR (OCULTO POR DEFECTO)
+                with st.expander("Comparar fila concreta", expanded=False):
+                    st.markdown("**Selecciona la fila del Principal que vols buscar a les Pestanyes:**")
+                    
+                    opcions_prin = []
+                    for idx, row in df_faltan_prin.iterrows():
+                        fila = int(row['Fila_Excel'])
+                        client = str(row[COL_CLIENTE_PRIN])
+                        import_ = str(row[COL_IMPORTE_PRIN])
+                        opcions_prin.append(f"Principal Fila {fila} | {client} | {import_}€")
+                    
+                    seleccionat_prin = st.selectbox("Tria una fila:", options=opcions_prin, index=0, key="sel_prin")
+                    
+                    if seleccionat_prin:
+                        idx_sel_prin = opcions_prin.index(seleccionat_prin)
+                        original_row_prin = df_faltan_prin.iloc[idx_sel_prin]
+                        df_orig_prin_display = pd.DataFrame([original_row_prin]).drop(columns=cols_amagar_prin_pantalla, errors='ignore')
+                        st.dataframe(df_orig_prin_display, use_container_width=True, hide_index=True)
+                        
+                        match_fi_pest = df_pestana[(df_pestana['Fecha_Limpia'] == original_row_prin['Fecha_Limpia']) & (df_pestana['Importe_Limpio'] == original_row_prin['Importe_Limpio'])]
+                        cols_amagar_pest = res['cols_tec'] + ['Estat_al_Principal', 'Estat_Documentacio']
+                        
+                        if not match_fi_pest.empty:
+                            match_pest_display = match_fi_pest.drop(columns=cols_amagar_pest, errors='ignore')
+                            styled_match_pest = match_pest_display.style.set_properties(**{'background-color': '#d4edda'}, subset=pd.IndexSlice[:, :])
+                            st.dataframe(styled_match_pest, use_container_width=True, hide_index=True)
+                        else:
+                            match_si_pest = df_pestana[(df_pestana['Importe_Limpio'] == original_row_prin['Importe_Limpio']) & (df_pestana['Fecha_Limpia'] != original_row_prin['Fecha_Limpia'])]
+                            if not match_si_pest.empty:
+                                match_pest_display = match_si_pest.drop(columns=cols_amagar_pest, errors='ignore')
+                                styled_match_pest = match_pest_display.style.set_properties(**{'background-color': '#fff3cd'}, subset=pd.IndexSlice[:, :])
+                                st.dataframe(styled_match_pest, use_container_width=True, hide_index=True)
+                            else:
+                                st.info("No hi ha coincidències possibles a les pestanyes per aquest cobrament bancari.")
 
-        # 1. FALTANTS AL PRINCIPAL
-        with st.expander("Revisar FALTEN", expanded=True):
-            if df_faltan.empty:
-                st.info("No falten cobraments.")
+        # 2. FALTANTS PESTANYES -> PRINCIPAL
+        with st.expander("Revisar FALTEN (Estan a Cobraments però no a Ingressos)", expanded=False):
+            if df_faltan_pest.empty:
+                st.info("Tots els cobraments interns estan a Ingressos.")
             else:
                 cols_amagar_pantalla = res['cols_tec'] + res['cols_ocult'] + ['Estat_al_Principal', 'Es_Repetit', 'Estat_Documentacio']
-                df_faltan_pantalla = df_faltan.drop(columns=cols_amagar_pantalla, errors='ignore')
+                df_faltan_pest_pantalla = df_faltan_pest.drop(columns=cols_amagar_pantalla, errors='ignore')
+                st.dataframe(df_faltan_pest_pantalla, use_container_width=True, hide_index=True)
                 
-                st.dataframe(df_faltan_pantalla, use_container_width=True, hide_index=True)
-                
-                st.markdown("---")
-                st.markdown("**Selecciona la fila que vols comparar amb el Principal:**")
-                
-                opcions = []
-                for idx, row in df_faltan.iterrows():
-                    pestanya = str(row['Origen_Pestana'])
-                    fila = int(row['Fila_Excel'])
-                    client = str(row[COL_CLIENTE_PEST])
-                    import_ = str(row[COL_IMPORTE_PEST])
-                    # Format millor: Pestanya X - Fila Y
-                    opcions.append(f"{pestanya} | Fila {fila} | {client} | {import_}€")
-                
-                seleccionat = st.selectbox("Tria una fila:", options=opcions, index=0)
-                
-                if seleccionat:
-                    idx_sel = opcions.index(seleccionat)
-                    original_row = df_faltan.iloc[idx_sel]
+                # DESPLEGABLE INTERN PARA COMPARAR (OCULTO POR DEFECTO)
+                with st.expander("Comparar fila concreta", expanded=False):
+                    st.markdown("**Selecciona la fila que vols comparar amb el Principal:**")
                     
-                    df_orig_display = pd.DataFrame([original_row]).drop(columns=cols_amagar_pantalla, errors='ignore')
-                    st.dataframe(df_orig_display, use_container_width=True, hide_index=True)
+                    opcions = []
+                    for idx, row in df_faltan_pest.iterrows():
+                        pestanya = str(row['Origen_Pestana'])
+                        fila = int(row['Fila_Excel'])
+                        client = str(row[COL_CLIENTE_PEST])
+                        import_ = str(row[COL_IMPORTE_PEST])
+                        opcions.append(f"{pestanya} | Fila {fila} | {client} | {import_}€")
                     
-                    match_fi = df_principal[(df_principal['Fecha_Limpia'] == original_row['Fecha_Limpia']) & (df_principal['Importe_Limpio'] == original_row['Importe_Limpio'])]
-                    cols_amagar_prin = res['cols_tec']
+                    seleccionat = st.selectbox("Tria una fila:", options=opcions, index=0, key="sel_pest")
                     
-                    if not match_fi.empty:
-                        match_display = match_fi.drop(columns=cols_amagar_prin, errors='ignore')
-                        styled_match = match_display.style.set_properties(**{'background-color': '#e7f1ff'}, subset=pd.IndexSlice[:, :])
-                        st.dataframe(styled_match, use_container_width=True, hide_index=True)
-                    else:
-                        match_si = df_principal[(df_principal['Importe_Limpio'] == original_row['Importe_Limpio']) & (df_principal['Fecha_Limpia'] != original_row['Fecha_Limpia'])]
-                        if not match_si.empty:
-                            match_display = match_si.drop(columns=cols_amagar_prin, errors='ignore')
-                            styled_match = match_display.style.set_properties(**{'background-color': '#fff3cd'}, subset=pd.IndexSlice[:, :])
+                    if seleccionat:
+                        idx_sel = opcions.index(seleccionat)
+                        original_row = df_faltan_pest.iloc[idx_sel]
+                        df_orig_display = pd.DataFrame([original_row]).drop(columns=cols_amagar_pantalla, errors='ignore')
+                        st.dataframe(df_orig_display, use_container_width=True, hide_index=True)
+                        
+                        match_fi = df_principal[(df_principal['Fecha_Limpia'] == original_row['Fecha_Limpia']) & (df_principal['Importe_Limpio'] == original_row['Importe_Limpio'])]
+                        cols_amagar_prin = res['cols_tec'] + ['Estat_a_Pestanes']
+                        
+                        if not match_fi.empty:
+                            match_display = match_fi.drop(columns=cols_amagar_prin, errors='ignore')
+                            styled_match = match_display.style.set_properties(**{'background-color': '#e7f1ff'}, subset=pd.IndexSlice[:, :])
                             st.dataframe(styled_match, use_container_width=True, hide_index=True)
                         else:
-                            st.info("No hi ha coincidències possibles al principal per a aquesta fila.")
+                            match_si = df_principal[(df_principal['Importe_Limpio'] == original_row['Importe_Limpio']) & (df_principal['Fecha_Limpia'] != original_row['Fecha_Limpia'])]
+                            if not match_si.empty:
+                                match_display = match_si.drop(columns=cols_amagar_prin, errors='ignore')
+                                styled_match = match_display.style.set_properties(**{'background-color': '#fff3cd'}, subset=pd.IndexSlice[:, :])
+                                st.dataframe(styled_match, use_container_width=True, hide_index=True)
+                            else:
+                                st.info("No hi ha coincidències possibles al principal per a aquesta fila.")
 
-        # 2. REPETITS
+        
+
+        # 3. REPETITS
         with st.expander("Revisar REPETITS"):
             st.dataframe(df_repetidos.drop(columns=res['cols_tec'], errors='ignore'), use_container_width=True, hide_index=True)
 
-        # 3. FALTA DOCUMENTACIÓ
+        # 4. FALTA DOCUMENTACIÓ
         with st.expander("Revisar files sense FACTURA/REBUT"):
             if df_falta_doc.empty:
                 st.info("Tots els cobraments tenen o bé Factura o bé Rebut.")
