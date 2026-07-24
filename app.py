@@ -22,7 +22,7 @@ COL_IMPORTE_PRIN = "Import"
 # ==========================================
 
 # --- Estils CSS per millorar l'aspecte sense canviar l'estructura ---
-st.set_page_config(page_title="Comparador Financer", layout="wide")
+st.set_page_config(page_title="Comparador", layout="wide")
 st.markdown("""
     <style>
     /* Fons sidebar més suau */
