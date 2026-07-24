@@ -160,7 +160,7 @@ def apply_excel_formatting(original_file_bytes, output_df_bytes, num_original_co
 # INTERFÍCIE ORIGINAL (VISUALMENT MILLORADA)
 # ==========================================
 
-st.title("⚖️ Comparador Financer")
+st.title("Comparador Financer")
 
 st.sidebar.header("📂 Pujar Fitxers")
 archivo_principal = st.sidebar.file_uploader("1️⃣ Excel LLISTAT DE COBRAMENTS", type=['xlsx', 'xls'])
@@ -339,6 +339,6 @@ if archivo_principal and archivo_pestana and hojas_seleccionadas:
                 st.dataframe(df_falta_doc_pantalla.style.set_properties(**{'background-color': '#ffe6e6'}), use_container_width=True, hide_index=True, height=300)
 
 elif not archivo_principal or not archivo_pestana:
-    st.info("👆 Si us plau, puja els dos fitxers Excel a la barra lateral per començar.")
+    st.info("Si us plau, puja els dos fitxers Excel a la barra lateral per començar.")
 elif not hojas_seleccionadas:
     st.warning("⚠️ Si us plau, selecciona almenys una pestanya a la barra lateral.")
