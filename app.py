@@ -25,15 +25,10 @@ COL_IMPORTE_PRIN = "Import"
 st.set_page_config(page_title="Comparador", layout="wide")
 st.markdown("""
     <style>
-    /* Fons sidebar més suau */
     [data-testid="stSidebar"] > div:first-child { background-color: #f8f9fa; }
-    
-    /* Metrics amb estil de targeta */
     div[data-testid="stMetricValue"] { font-size: 1.8rem; font-weight: bold; color: #1E3A8A; }
     div[data-testid="stMetricLabel"] { font-size: 1rem; font-weight: 600; }
     [data-testid="stMetric"] { background-color: #ffffff; border: 1px solid #e5e7eb; border-radius: 8px; padding: 15px 10px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
-    
-    /* Expansors més definits */
     .stExpander { border: 1px solid #e5e7eb; border-radius: 8px; margin-bottom: 10px; }
     streamlit-expanderHeader { font-weight: bold; font-size: 1.1rem; }
     </style>
@@ -103,7 +98,7 @@ def processar_dades(archivo_principal_bytes, archivo_pestana_bytes, hojas_selecc
     df_principal['Estat_a_Pestanes'] = df_principal.apply(lambda row: check_principal_en_pestanyes(row, df_pestana), axis=1)
     df_principal['Fila_Excel'] = df_principal.index + 2 
 
-    # Comprovacions de qualitat
+    # Comprovacions de qualitat (Ingressos)
     df_pestana['Es_Repetit'] = df_pestana.duplicated(subset=['Fecha_Limpia', 'Importe_Limpio', 'Nombre_Match', 'Concepte_Check'], keep=False).map({True: 'SI REPETIT', False: 'NO'})
     df_pestana['Factura_Check'] = df_pestana[COL_FACTURA_PEST].fillna('').astype(str).str.strip()
     df_pestana['Rebut_Check'] = df_pestana[COL_REBUT_PEST].fillna('').astype(str).str.strip()
@@ -111,7 +106,7 @@ def processar_dades(archivo_principal_bytes, archivo_pestana_bytes, hojas_selecc
     mask_no_doc = (df_pestana['Factura_Check'] == '') & (df_pestana['Rebut_Check'] == '')
     df_pestana.loc[mask_no_doc, 'Estat_Documentacio'] = 'FALTA FACTURA I REBUT'
 
-    # Separar resultats
+    # Separar resultats per les pestanyes de resum
     df_faltan_pest = df_pestana[df_pestana['Estat_al_Principal'] == 'FALTA'].copy()
     df_faltan_prin = df_principal[df_principal['Estat_a_Pestanes'] == 'FALTA'].copy()
     df_repetidos = df_pestana[df_pestana['Es_Repetit'] == 'SI REPETIT'].copy()
@@ -119,34 +114,109 @@ def processar_dades(archivo_principal_bytes, archivo_pestana_bytes, hojas_selecc
 
     return df_principal, df_pestana, df_faltan_prin, df_faltan_pest, df_repetidos, df_falta_doc
 
-def apply_excel_formatting(original_file_bytes, output_df_bytes, num_original_cols):
+# --- FUNCIÓ DE FORMAT ---
+def get_styles_from_wb(wb):
+    ws = wb.active
+    styles, widths = {}, {}
+    for cell in ws[1]:
+        if cell.value is not None:
+            styles[cell.column] = {'font': copy(cell.font), 'fill': copy(cell.fill), 'border': copy(cell.border), 'alignment': copy(cell.alignment)}
+            widths[cell.column] = ws.column_dimensions[cell.column_letter].width
+    return styles, widths
+
+def apply_excel_formatting(ingressos_bytes, cobraments_bytes, output_df_bytes, num_cols_ing, num_cols_cob):
     try:
-        wb_orig = load_workbook(io.BytesIO(original_file_bytes))
-        ws_orig = wb_orig.active
-        orig_header_styles, orig_col_widths = {}, {}
-        for cell in ws_orig[1]:
-            if cell.value is not None:
-                orig_header_styles[cell.column] = {'font': copy(cell.font), 'fill': copy(cell.fill), 'border': copy(cell.border), 'alignment': copy(cell.alignment)}
-                orig_col_widths[cell.column] = ws_orig.column_dimensions[cell.column_letter].width
+        styles_ing, widths_ing = get_styles_from_wb(load_workbook(io.BytesIO(ingressos_bytes)))
+        styles_cob, widths_cob = get_styles_from_wb(load_workbook(io.BytesIO(cobraments_bytes)))
 
         wb_out = load_workbook(io.BytesIO(output_df_bytes))
         new_font, new_fill = Font(bold=True, color="FFFFFF"), PatternFill(start_color="4F81BD", end_color="4F81BD", fill_type="solid")
-        new_border, new_alignment = Border(left=Side(style='thin'), right=Side(style='thin'), top=Side(style='thin'), bottom=Side(style='thin')), Alignment(horizontal='center', vertical='center', wrap_text=True)
+        new_border = Border(left=Side(style='thin'), right=Side(style='thin'), top=Side(style='thin'), bottom=Side(style='thin'))
+        new_alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
         data_border = Border(left=Side(style='thin'), right=Side(style='thin'), top=Side(style='thin'), bottom=Side(style='thin'))
 
+        # Colors per erros
+        fill_falta = PatternFill(start_color="FFC7CE", end_color="FFC7CE", fill_type="solid") # Vermell suau
+        fill_repetit = PatternFill(start_color="FFEB9C", end_color="FFEB9C", fill_type="solid") # Groc suau
+        fill_falta_doc = PatternFill(start_color="BDD7EE", end_color="BDD7EE", fill_type="solid") # Blau suau
+
+        # Mapa d'estils actualitzat amb els NOMS INTERCANVIATS segons ha demanat l'usuari
+        # (El contingut de la pestanya 'Ingressos' ve del fitxer Cobraments, per això usa styles_cob)
+        sheet_map = {
+            'Ingressos': (styles_cob, widths_cob, num_cols_cob),
+            'No_estan_a_Cobraments': (styles_cob, widths_cob, num_cols_cob),
+            'Cobraments': (styles_ing, widths_ing, num_cols_ing),
+            'No_estan_a_Ingressos': (styles_ing, widths_ing, num_cols_ing),
+            'Repetits': (styles_ing, widths_ing, num_cols_ing),
+            'Falta_Documentacio': (styles_ing, widths_ing, num_cols_ing)
+        }
+
         for ws_out in wb_out.worksheets:
+            orig_styles, orig_widths, num_orig_cols = sheet_map.get(ws_out.title, ({}, {}, 0))
+            headers = {}
+            
+            # 1. Format Header
             for cell in ws_out[1]:
                 cell.border = new_border
-                if cell.column <= num_original_cols and cell.column in orig_header_styles:
-                    style = orig_header_styles[cell.column]
+                if cell.value is not None:
+                    headers[cell.value] = cell.column
+                if cell.column <= num_orig_cols and cell.column in orig_styles:
+                    style = orig_styles[cell.column]
                     cell.font, cell.fill, cell.border, cell.alignment = style['font'], style['fill'], style['border'], style['alignment']
-                elif cell.column > num_original_cols:
+                elif cell.column > num_orig_cols:
                     cell.font, cell.fill, cell.alignment = new_font, new_fill, new_alignment
-            for row in ws_out.iter_rows(min_row=2, max_row=ws_out.max_row, max_col=ws_out.max_column):
-                for cell in row:
+
+            # 2. Identificar columnes d'estat
+            col_falta_cob = headers.get('Falta en Cobraments')
+            col_falta_ing = headers.get('Falta en Ingressos')
+            col_repetit = headers.get('Repetit?')
+            col_falta_doc = headers.get('Falta Factura/Rebut?')
+            sheet_name = ws_out.title
+
+            # 3. Format Data Rows (Colors d'error)
+            for row_cells in ws_out.iter_rows(min_row=2, max_row=ws_out.max_row, max_col=ws_out.max_column):
+                row_fill = None
+                
+                # Prioritat 1: Falta (Vermell)
+                if col_falta_cob or col_falta_ing:
+                    for cell in row_cells:
+                        if (cell.column == col_falta_cob and cell.value == 'SÍ') or \
+                           (cell.column == col_falta_ing and cell.value == 'SÍ'):
+                            row_fill = fill_falta
+                            break
+                
+                # Prioritat 2: Repetit (Groc)
+                if not row_fill and col_repetit:
+                    for cell in row_cells:
+                        if cell.column == col_repetit and cell.value == 'SÍ':
+                            row_fill = fill_repetit
+                            break
+                            
+                # Prioritat 3: Falta Doc (Blau)
+                if not row_fill and col_falta_doc:
+                    for cell in row_cells:
+                        if cell.column == col_falta_doc and cell.value == 'SÍ':
+                            row_fill = fill_falta_doc
+                            break
+                            
+                # Fallback per pestanyes específiques d'errors (Noms intercanviats)
+                if not row_fill:
+                    if sheet_name in ['No_estan_a_Ingressos', 'No_estan_a_Cobraments']:
+                        row_fill = fill_falta
+                    elif sheet_name == 'Repetits':
+                        row_fill = fill_repetit
+                    elif sheet_name == 'Falta_Documentacio':
+                        row_fill = fill_falta_doc
+
+                # Aplicar formats (Fons, Borde i Amplada)
+                for cell in row_cells:
                     cell.border = data_border
-                    if cell.column <= num_original_cols and cell.column in orig_col_widths: ws_out.column_dimensions[cell.column_letter].width = orig_col_widths[cell.column]
-                    elif cell.column > num_original_cols: ws_out.column_dimensions[cell.column_letter].width = 25
+                    if row_fill:
+                        cell.fill = row_fill
+                    if cell.column <= num_orig_cols and cell.column in orig_widths: 
+                        ws_out.column_dimensions[cell.column_letter].width = orig_widths[cell.column]
+                    elif cell.column > num_orig_cols: 
+                        ws_out.column_dimensions[cell.column_letter].width = 25
 
         final_output = io.BytesIO()
         wb_out.save(final_output)
@@ -157,7 +227,7 @@ def apply_excel_formatting(original_file_bytes, output_df_bytes, num_original_co
         return io.BytesIO(output_df_bytes)
 
 # ==========================================
-# INTERFÍCIE ORIGINAL (VISUALMENT MILLORADA)
+# INTERFÍCIE
 # ==========================================
 
 st.title("Comparador")
@@ -177,19 +247,33 @@ if archivo_principal and archivo_pestana and hojas_seleccionadas:
         with st.spinner("⏳ Processant i creuant dades... Aquesta operació pot trigar uns segons."):
             df_principal, df_pestana, df_faltan_prin, df_faltan_pest, df_repetidos, df_falta_doc = processar_dades(archivo_principal.getvalue(), archivo_pestana.getvalue(), hojas_seleccionadas)
 
-            cols_tec = ['Fecha_Limpia', 'Nombre_Match', 'Importe_Str', 'Importe_Limpio', 'Factura_Check', 'Rebut_Check', 'Concepte_Check', 'Estat_a_Pestanes', 'Estat_al_Principal']
+            # --- CREAR COLUMNES AMIGABLES ---
+            df_pestana['Falta en Cobraments'] = df_pestana['Estat_al_Principal'].map({'FALTA': 'SÍ', 'TROBAT': 'NO'})
+            df_principal['Falta en Ingressos'] = df_principal['Estat_a_Pestanes'].map({'FALTA': 'SÍ', 'TROBAT': 'NO'})
+            df_pestana['Repetit?'] = df_pestana['Es_Repetit'].map({'SI REPETIT': 'SÍ', 'NO': 'NO'})
+            df_pestana['Falta Factura/Rebut?'] = df_pestana['Estat_Documentacio'].map({'FALTA FACTURA I REBUT': 'SÍ', 'OK': 'NO'})
+
+            cols_tec = ['Fecha_Limpia', 'Nombre_Match', 'Importe_Str', 'Importe_Limpio', 'Factura_Check', 'Rebut_Check', 'Concepte_Check', 'Estat_a_Pestanes', 'Estat_al_Principal', 'Es_Repetit', 'Estat_Documentacio']
             cols_ocult = ['INCIDÈNCIES SECRETARIA', 'INCIDÈNCIES RECEPCIÓ MOSTRES', 'INCIDÈNCIES']
-            num_original_cols = len(pd.read_excel(archivo_pestana, sheet_name=hojas_seleccionadas[0], nrows=0).columns)
+            
+            # Calcular número de columnes originals per cada fitxer
+            num_cols_ing = len(pd.read_excel(archivo_pestana, sheet_name=hojas_seleccionadas[0], nrows=0).columns)
+            num_cols_cob = len(pd.read_excel(archivo_principal, nrows=0).columns)
             
             raw_output = io.BytesIO()
             with pd.ExcelWriter(raw_output, engine='openpyxl') as writer:
-                df_pestana.drop(columns=cols_tec, errors='ignore').to_excel(writer, sheet_name='Tot_Creuat', index=False)
-                df_faltan_pest.drop(columns=cols_tec + cols_ocult, errors='ignore').to_excel(writer, sheet_name='Falten_Pestanyes_al_Principal', index=False)
-                df_faltan_prin.drop(columns=cols_tec, errors='ignore').to_excel(writer, sheet_name='Falten_Principal_a_Pestanyes', index=False)
-                df_repetidos.drop(columns=cols_tec, errors='ignore').to_excel(writer, sheet_name='Repetits_a_Pestanyes', index=False)
-                df_falta_doc.drop(columns=cols_tec, errors='ignore').to_excel(writer, sheet_name='Falta_Documentacio', index=False)
+                # 1. Fitxers complets creuats (NOMS INTERCANVIATS)
+                df_principal.drop(columns=cols_tec, errors='ignore').to_excel(writer, sheet_name='Ingressos', index=False)
+                df_pestana.drop(columns=cols_tec, errors='ignore').to_excel(writer, sheet_name='Cobraments', index=False)
+                
+                # 2. Resums específics d'errors (NOMS INTERCANVIATS)
+                df_faltan_prin.drop(columns=cols_tec, errors='ignore').to_excel(writer, sheet_name='No_estan_a_Cobraments', index=False)
+                df_faltan_pest.drop(columns=cols_tec + cols_ocult, errors='ignore').to_excel(writer, sheet_name='No_estan_a_Ingressos', index=False)
+                df_repetidos.drop(columns=cols_tec, errors='ignore').to_excel(writer, sheet_name='Repetits', index=False)
+                df_falta_doc.drop(columns=cols_tec + cols_ocult, errors='ignore').to_excel(writer, sheet_name='Falta_Documentacio', index=False)
+                
             raw_output.seek(0)
-            final_output = apply_excel_formatting(archivo_pestana.getvalue(), raw_output.getvalue(), num_original_cols)
+            final_output = apply_excel_formatting(archivo_pestana.getvalue(), archivo_principal.getvalue(), raw_output.getvalue(), num_cols_ing, num_cols_cob)
 
             st.session_state['resultats'] = {
                 'df_principal': df_principal, 'df_pestana': df_pestana,
@@ -222,11 +306,9 @@ if archivo_principal and archivo_pestana and hojas_seleccionadas:
             if df_faltan_prin.empty:
                 st.info("✅ Tots els cobraments de Ingressos estan registrats al Listat de Cobraments.")
             else:
-                cols_amagar_prin_pantalla = res['cols_tec'] + ['Estat_a_Pestanes']
-                df_faltan_prin_pantalla = df_faltan_prin.drop(columns=cols_amagar_prin_pantalla, errors='ignore')
+                df_faltan_prin_pantalla = df_faltan_prin.drop(columns=res['cols_tec'], errors='ignore')
                 st.dataframe(df_faltan_prin_pantalla, use_container_width=True, hide_index=True, height=300)
                 
-                # DESPLEGABLE INTERN PARA COMPARAR (OCULTO POR DEFECTO)
                 with st.expander("🔍 Comparar fila concreta", expanded=False):
                     st.markdown("**Selecciona la fila del Principal que vols buscar a les Pestanyes:**")
                     
@@ -243,28 +325,24 @@ if archivo_principal and archivo_pestana and hojas_seleccionadas:
                         idx_sel_prin = opcions_prin.index(seleccionat_prin)
                         original_row_prin = df_faltan_prin.iloc[idx_sel_prin]
                         
-                        # Millora visual: Side-by-side comparison
                         col_orig, col_match = st.columns(2)
                         
                         with col_orig:
                             st.markdown("**📌 Fila Original:**")
-                            df_orig_prin_display = pd.DataFrame([original_row_prin]).drop(columns=cols_amagar_prin_pantalla, errors='ignore')
+                            df_orig_prin_display = pd.DataFrame([original_row_prin]).drop(columns=res['cols_tec'], errors='ignore')
                             st.dataframe(df_orig_prin_display.style.set_properties(**{'background-color': '#e7f1ff'}), use_container_width=True, hide_index=True)
                         
                         with col_match:
                             st.markdown("**🟩 Possibles Coincidències:**")
                             match_fi_pest = df_pestana[(df_pestana['Fecha_Limpia'] == original_row_prin['Fecha_Limpia']) & (df_pestana['Importe_Limpio'] == original_row_prin['Importe_Limpio'])]
-                            cols_amagar_pest = res['cols_tec'] + ['Estat_al_Principal', 'Estat_Documentacio']
                             
                             if not match_fi_pest.empty:
-                                match_pest_display = match_fi_pest.drop(columns=cols_amagar_pest, errors='ignore')
-                                # Verd per coincidència exacte (data i import)
+                                match_pest_display = match_fi_pest.drop(columns=res['cols_tec'], errors='ignore')
                                 st.dataframe(match_pest_display.style.set_properties(**{'background-color': '#d4edda'}), use_container_width=True, hide_index=True)
                             else:
                                 match_si_pest = df_pestana[(df_pestana['Importe_Limpio'] == original_row_prin['Importe_Limpio']) & (df_pestana['Fecha_Limpia'] != original_row_prin['Fecha_Limpia'])]
                                 if not match_si_pest.empty:
-                                    match_pest_display = match_si_pest.drop(columns=cols_amagar_pest, errors='ignore')
-                                    # Groc per coincidència parcial (import però no data)
+                                    match_pest_display = match_si_pest.drop(columns=res['cols_tec'], errors='ignore')
                                     st.warning("⚠️ Coincidència parcial: Mateix import, diferent data.")
                                     st.dataframe(match_pest_display.style.set_properties(**{'background-color': '#fff3cd'}), use_container_width=True, hide_index=True)
                                 else:
@@ -275,11 +353,10 @@ if archivo_principal and archivo_pestana and hojas_seleccionadas:
             if df_faltan_pest.empty:
                 st.info("✅ Tots els cobraments interns estan a Ingressos.")
             else:
-                cols_amagar_pantalla = res['cols_tec'] + res['cols_ocult'] + ['Estat_al_Principal', 'Es_Repetit', 'Estat_Documentacio']
+                cols_amagar_pantalla = res['cols_tec'] + res['cols_ocult']
                 df_faltan_pest_pantalla = df_faltan_pest.drop(columns=cols_amagar_pantalla, errors='ignore')
                 st.dataframe(df_faltan_pest_pantalla, use_container_width=True, hide_index=True, height=300)
                 
-                # DESPLEGABLE INTERN PARA COMPARAR (OCULTO POR DEFECTO)
                 with st.expander("🔍 Comparar fila concreta", expanded=False):
                     st.markdown("**Selecciona la fila que vols comparar amb el Principal:**")
                     
@@ -297,7 +374,6 @@ if archivo_principal and archivo_pestana and hojas_seleccionadas:
                         idx_sel = opcions.index(seleccionat)
                         original_row = df_faltan_pest.iloc[idx_sel]
                         
-                        # Millora visual: Side-by-side comparison
                         col_orig2, col_match2 = st.columns(2)
                         
                         with col_orig2:
@@ -308,15 +384,14 @@ if archivo_principal and archivo_pestana and hojas_seleccionadas:
                         with col_match2:
                             st.markdown("**🟩 Possibles Coincidències:**")
                             match_fi = df_principal[(df_principal['Fecha_Limpia'] == original_row['Fecha_Limpia']) & (df_principal['Importe_Limpio'] == original_row['Importe_Limpio'])]
-                            cols_amagar_prin = res['cols_tec'] + ['Estat_a_Pestanes']
                             
                             if not match_fi.empty:
-                                match_display = match_fi.drop(columns=cols_amagar_prin, errors='ignore')
+                                match_display = match_fi.drop(columns=res['cols_tec'], errors='ignore')
                                 st.dataframe(match_display.style.set_properties(**{'background-color': '#d4edda'}), use_container_width=True, hide_index=True)
                             else:
                                 match_si = df_principal[(df_principal['Importe_Limpio'] == original_row['Importe_Limpio']) & (df_principal['Fecha_Limpia'] != original_row['Fecha_Limpia'])]
                                 if not match_si.empty:
-                                    match_display = match_si.drop(columns=cols_amagar_prin, errors='ignore')
+                                    match_display = match_si.drop(columns=res['cols_tec'], errors='ignore')
                                     st.warning("⚠️ Coincidència parcial: Mateix import, diferent data.")
                                     st.dataframe(match_display.style.set_properties(**{'background-color': '#fff3cd'}), use_container_width=True, hide_index=True)
                                 else:
@@ -334,7 +409,7 @@ if archivo_principal and archivo_pestana and hojas_seleccionadas:
             if df_falta_doc.empty:
                 st.info("✅ Tots els cobraments tenen o bé Factura o bé Rebut.")
             else:
-                cols_amagar_doc = res['cols_tec'] + ['Estat_al_Principal', 'Es_Repetit', 'Estat_Documentacio'] + res['cols_ocult']
+                cols_amagar_doc = res['cols_tec'] + res['cols_ocult']
                 df_falta_doc_pantalla = df_falta_doc.drop(columns=cols_amagar_doc, errors='ignore')
                 st.dataframe(df_falta_doc_pantalla.style.set_properties(**{'background-color': '#ffe6e6'}), use_container_width=True, hide_index=True, height=300)
 
