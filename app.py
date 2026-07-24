@@ -21,6 +21,24 @@ COL_CLIENTE_PRIN = "Nom"
 COL_IMPORTE_PRIN = "Import"
 # ==========================================
 
+# --- Estils CSS per millorar l'aspecte sense canviar l'estructura ---
+st.set_page_config(page_title="Comparador Financer", layout="wide")
+st.markdown("""
+    <style>
+    /* Fons sidebar més suau */
+    [data-testid="stSidebar"] > div:first-child { background-color: #f8f9fa; }
+    
+    /* Metrics amb estil de targeta */
+    div[data-testid="stMetricValue"] { font-size: 1.8rem; font-weight: bold; color: #1E3A8A; }
+    div[data-testid="stMetricLabel"] { font-size: 1rem; font-weight: 600; }
+    [data-testid="stMetric"] { background-color: #ffffff; border: 1px solid #e5e7eb; border-radius: 8px; padding: 15px 10px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
+    
+    /* Expansors més definits */
+    .stExpander { border: 1px solid #e5e7eb; border-radius: 8px; margin-bottom: 10px; }
+    streamlit-expanderHeader { font-weight: bold; font-size: 1.1rem; }
+    </style>
+""", unsafe_allow_html=True)
+
 def netejar_nom_empresa(nom):
     if pd.isna(nom):
         return ""
@@ -138,22 +156,25 @@ def apply_excel_formatting(original_file_bytes, output_df_bytes, num_original_co
         print(f"Error aplicant format: {e}")
         return io.BytesIO(output_df_bytes)
 
-st.set_page_config(page_title="Comparador", page_icon="$", layout="wide")
-st.title("Comparador")
+# ==========================================
+# INTERFÍCIE ORIGINAL (VISUALMENT MILLORADA)
+# ==========================================
 
-st.sidebar.header("Pujar Fitxers")
-archivo_principal = st.sidebar.file_uploader("1. Excel LLISTAT DE COBRAMENTS", type=['xlsx', 'xls'])
-archivo_pestana = st.sidebar.file_uploader("2. Excel INGRESSOS", type=['xlsx', 'xls'])
+st.title("⚖️ Comparador Financer")
+
+st.sidebar.header("📂 Pujar Fitxers")
+archivo_principal = st.sidebar.file_uploader("1️⃣ Excel LLISTAT DE COBRAMENTS", type=['xlsx', 'xls'])
+archivo_pestana = st.sidebar.file_uploader("2️⃣ Excel INGRESSOS", type=['xlsx', 'xls'])
 
 hojas_seleccionadas = []
 if archivo_pestana:
     xls = pd.ExcelFile(archivo_pestana)
-    hojas_seleccionadas = st.sidebar.multiselect("Selecciona les pestanyes a comprovar:", options=xls.sheet_names, default=xls.sheet_names[:3])
+    hojas_seleccionadas = st.sidebar.multiselect("📑 Selecciona les pestanyes a comprovar:", options=xls.sheet_names, default=xls.sheet_names[:3])
 
 if archivo_principal and archivo_pestana and hojas_seleccionadas:
     
-    if st.sidebar.button("Iniciar Comparació", type="primary"):
-        with st.spinner("Processant i creuant dades..."):
+    if st.sidebar.button("🚀 Iniciar Comparació", type="primary", use_container_width=True):
+        with st.spinner("⏳ Processant i creuant dades... Aquesta operació pot trigar uns segons."):
             df_principal, df_pestana, df_faltan_prin, df_faltan_pest, df_repetidos, df_falta_doc = processar_dades(archivo_principal.getvalue(), archivo_pestana.getvalue(), hojas_seleccionadas)
 
             cols_tec = ['Fecha_Limpia', 'Nombre_Match', 'Importe_Str', 'Importe_Limpio', 'Factura_Check', 'Rebut_Check', 'Concepte_Check', 'Estat_a_Pestanes', 'Estat_al_Principal']
@@ -187,25 +208,26 @@ if archivo_principal and archivo_pestana and hojas_seleccionadas:
         df_repetidos = res['df_repetidos']
         df_falta_doc = res['df_falta_doc']
         
-        st.success("Procés finalitzat amb èxit.")
+        st.success("✅ Procés finalitzat amb èxit.")
         col1, col2, col3, col4 = st.columns(4)
-        col1.metric("FALTEN Cobraments", len(df_faltan_prin))
-        col2.metric("FALTEN Ingressos", len(df_faltan_pest))
-        col3.metric("REPETITS", len(df_repetidos))
-        col4.metric("Falta FACT/REBUT", len(df_falta_doc))
+        col1.metric("🔴 FALTEN Cobraments", len(df_faltan_prin), delta="Ingressos sense registre", delta_color="inverse")
+        col2.metric("🟠 FALTEN Ingressos", len(df_faltan_pest), delta="Cobraments sense ingrés", delta_color="inverse")
+        col3.metric("🟡 REPETITS", len(df_repetidos))
+        col4.metric("🔵 Falta FACT/REBUT", len(df_falta_doc))
 
-        st.download_button("Descarregar Excel de Resultats", data=res['final_output'], file_name="Comparacio_Resultat.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        st.download_button("⬇️ Descarregar Excel de Resultats", data=res['final_output'], file_name="Comparacio_Resultat.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", type="primary", use_container_width=True)
+        
         # 1. FALTANTS PRINCIPAL -> PESTANYES
-        with st.expander("Revisar FALTEN Cobraments (Estan a Ingressos però no a Cobraments)", expanded=False):
+        with st.expander("⬇️ Revisar FALTEN (Estan a Ingressos però no a Cobraments)", expanded=False):
             if df_faltan_prin.empty:
-                st.info("Tots els cobraments de Ingressos estan registrats al Listat de Cobraments.")
+                st.info("✅ Tots els cobraments de Ingressos estan registrats al Listat de Cobraments.")
             else:
                 cols_amagar_prin_pantalla = res['cols_tec'] + ['Estat_a_Pestanes']
                 df_faltan_prin_pantalla = df_faltan_prin.drop(columns=cols_amagar_prin_pantalla, errors='ignore')
-                st.dataframe(df_faltan_prin_pantalla, use_container_width=True, hide_index=True)
+                st.dataframe(df_faltan_prin_pantalla, use_container_width=True, hide_index=True, height=300)
                 
                 # DESPLEGABLE INTERN PARA COMPARAR (OCULTO POR DEFECTO)
-                with st.expander("Comparar fila concreta", expanded=False):
+                with st.expander("🔍 Comparar fila concreta", expanded=False):
                     st.markdown("**Selecciona la fila del Principal que vols buscar a les Pestanyes:**")
                     
                     opcions_prin = []
@@ -220,36 +242,45 @@ if archivo_principal and archivo_pestana and hojas_seleccionadas:
                     if seleccionat_prin:
                         idx_sel_prin = opcions_prin.index(seleccionat_prin)
                         original_row_prin = df_faltan_prin.iloc[idx_sel_prin]
-                        df_orig_prin_display = pd.DataFrame([original_row_prin]).drop(columns=cols_amagar_prin_pantalla, errors='ignore')
-                        st.dataframe(df_orig_prin_display, use_container_width=True, hide_index=True)
                         
-                        match_fi_pest = df_pestana[(df_pestana['Fecha_Limpia'] == original_row_prin['Fecha_Limpia']) & (df_pestana['Importe_Limpio'] == original_row_prin['Importe_Limpio'])]
-                        cols_amagar_pest = res['cols_tec'] + ['Estat_al_Principal', 'Estat_Documentacio']
+                        # Millora visual: Side-by-side comparison
+                        col_orig, col_match = st.columns(2)
                         
-                        if not match_fi_pest.empty:
-                            match_pest_display = match_fi_pest.drop(columns=cols_amagar_pest, errors='ignore')
-                            styled_match_pest = match_pest_display.style.set_properties(**{'background-color': '#d4edda'}, subset=pd.IndexSlice[:, :])
-                            st.dataframe(styled_match_pest, use_container_width=True, hide_index=True)
-                        else:
-                            match_si_pest = df_pestana[(df_pestana['Importe_Limpio'] == original_row_prin['Importe_Limpio']) & (df_pestana['Fecha_Limpia'] != original_row_prin['Fecha_Limpia'])]
-                            if not match_si_pest.empty:
-                                match_pest_display = match_si_pest.drop(columns=cols_amagar_pest, errors='ignore')
-                                styled_match_pest = match_pest_display.style.set_properties(**{'background-color': '#fff3cd'}, subset=pd.IndexSlice[:, :])
-                                st.dataframe(styled_match_pest, use_container_width=True, hide_index=True)
+                        with col_orig:
+                            st.markdown("**📌 Fila Original:**")
+                            df_orig_prin_display = pd.DataFrame([original_row_prin]).drop(columns=cols_amagar_prin_pantalla, errors='ignore')
+                            st.dataframe(df_orig_prin_display.style.set_properties(**{'background-color': '#e7f1ff'}), use_container_width=True, hide_index=True)
+                        
+                        with col_match:
+                            st.markdown("**🟩 Possibles Coincidències:**")
+                            match_fi_pest = df_pestana[(df_pestana['Fecha_Limpia'] == original_row_prin['Fecha_Limpia']) & (df_pestana['Importe_Limpio'] == original_row_prin['Importe_Limpio'])]
+                            cols_amagar_pest = res['cols_tec'] + ['Estat_al_Principal', 'Estat_Documentacio']
+                            
+                            if not match_fi_pest.empty:
+                                match_pest_display = match_fi_pest.drop(columns=cols_amagar_pest, errors='ignore')
+                                # Verd per coincidència exacte (data i import)
+                                st.dataframe(match_pest_display.style.set_properties(**{'background-color': '#d4edda'}), use_container_width=True, hide_index=True)
                             else:
-                                st.info("No hi ha coincidències possibles a les pestanyes per aquest cobrament bancari.")
+                                match_si_pest = df_pestana[(df_pestana['Importe_Limpio'] == original_row_prin['Importe_Limpio']) & (df_pestana['Fecha_Limpia'] != original_row_prin['Fecha_Limpia'])]
+                                if not match_si_pest.empty:
+                                    match_pest_display = match_si_pest.drop(columns=cols_amagar_pest, errors='ignore')
+                                    # Groc per coincidència parcial (import però no data)
+                                    st.warning("⚠️ Coincidència parcial: Mateix import, diferent data.")
+                                    st.dataframe(match_pest_display.style.set_properties(**{'background-color': '#fff3cd'}), use_container_width=True, hide_index=True)
+                                else:
+                                    st.error("❌ No hi ha coincidències possibles a les pestanyes per aquest cobrament bancari.")
 
         # 2. FALTANTS PESTANYES -> PRINCIPAL
-        with st.expander("Revisar FALTEN Ingressos (Estan a Cobraments però no a Ingressos)", expanded=False):
+        with st.expander("⬆️ Revisar FALTEN (Estan a Cobraments però no a Ingressos)", expanded=False):
             if df_faltan_pest.empty:
-                st.info("Tots els cobraments interns estan a Ingressos.")
+                st.info("✅ Tots els cobraments interns estan a Ingressos.")
             else:
                 cols_amagar_pantalla = res['cols_tec'] + res['cols_ocult'] + ['Estat_al_Principal', 'Es_Repetit', 'Estat_Documentacio']
                 df_faltan_pest_pantalla = df_faltan_pest.drop(columns=cols_amagar_pantalla, errors='ignore')
-                st.dataframe(df_faltan_pest_pantalla, use_container_width=True, hide_index=True)
+                st.dataframe(df_faltan_pest_pantalla, use_container_width=True, hide_index=True, height=300)
                 
                 # DESPLEGABLE INTERN PARA COMPARAR (OCULTO POR DEFECTO)
-                with st.expander("Comparar fila concreta", expanded=False):
+                with st.expander("🔍 Comparar fila concreta", expanded=False):
                     st.markdown("**Selecciona la fila que vols comparar amb el Principal:**")
                     
                     opcions = []
@@ -265,42 +296,49 @@ if archivo_principal and archivo_pestana and hojas_seleccionadas:
                     if seleccionat:
                         idx_sel = opcions.index(seleccionat)
                         original_row = df_faltan_pest.iloc[idx_sel]
-                        df_orig_display = pd.DataFrame([original_row]).drop(columns=cols_amagar_pantalla, errors='ignore')
-                        st.dataframe(df_orig_display, use_container_width=True, hide_index=True)
                         
-                        match_fi = df_principal[(df_principal['Fecha_Limpia'] == original_row['Fecha_Limpia']) & (df_principal['Importe_Limpio'] == original_row['Importe_Limpio'])]
-                        cols_amagar_prin = res['cols_tec'] + ['Estat_a_Pestanes']
+                        # Millora visual: Side-by-side comparison
+                        col_orig2, col_match2 = st.columns(2)
                         
-                        if not match_fi.empty:
-                            match_display = match_fi.drop(columns=cols_amagar_prin, errors='ignore')
-                            styled_match = match_display.style.set_properties(**{'background-color': '#e7f1ff'}, subset=pd.IndexSlice[:, :])
-                            st.dataframe(styled_match, use_container_width=True, hide_index=True)
-                        else:
-                            match_si = df_principal[(df_principal['Importe_Limpio'] == original_row['Importe_Limpio']) & (df_principal['Fecha_Limpia'] != original_row['Fecha_Limpia'])]
-                            if not match_si.empty:
-                                match_display = match_si.drop(columns=cols_amagar_prin, errors='ignore')
-                                styled_match = match_display.style.set_properties(**{'background-color': '#fff3cd'}, subset=pd.IndexSlice[:, :])
-                                st.dataframe(styled_match, use_container_width=True, hide_index=True)
+                        with col_orig2:
+                            st.markdown("**📌 Fila Original:**")
+                            df_orig_display = pd.DataFrame([original_row]).drop(columns=cols_amagar_pantalla, errors='ignore')
+                            st.dataframe(df_orig_display.style.set_properties(**{'background-color': '#fff3cd'}), use_container_width=True, hide_index=True)
+                        
+                        with col_match2:
+                            st.markdown("**🟩 Possibles Coincidències:**")
+                            match_fi = df_principal[(df_principal['Fecha_Limpia'] == original_row['Fecha_Limpia']) & (df_principal['Importe_Limpio'] == original_row['Importe_Limpio'])]
+                            cols_amagar_prin = res['cols_tec'] + ['Estat_a_Pestanes']
+                            
+                            if not match_fi.empty:
+                                match_display = match_fi.drop(columns=cols_amagar_prin, errors='ignore')
+                                st.dataframe(match_display.style.set_properties(**{'background-color': '#d4edda'}), use_container_width=True, hide_index=True)
                             else:
-                                st.info("No hi ha coincidències possibles al principal per a aquesta fila.")
-
-        
+                                match_si = df_principal[(df_principal['Importe_Limpio'] == original_row['Importe_Limpio']) & (df_principal['Fecha_Limpia'] != original_row['Fecha_Limpia'])]
+                                if not match_si.empty:
+                                    match_display = match_si.drop(columns=cols_amagar_prin, errors='ignore')
+                                    st.warning("⚠️ Coincidència parcial: Mateix import, diferent data.")
+                                    st.dataframe(match_display.style.set_properties(**{'background-color': '#fff3cd'}), use_container_width=True, hide_index=True)
+                                else:
+                                    st.error("❌ No hi ha coincidències possibles al principal per a aquesta fila.")
 
         # 3. REPETITS
-        with st.expander("Revisar REPETITS"):
-            st.dataframe(df_repetidos.drop(columns=res['cols_tec'], errors='ignore'), use_container_width=True, hide_index=True)
+        with st.expander("🔄 Revisar REPETITS"):
+            if df_repetidos.empty:
+                st.info("✅ No hi ha files repetides a les pestanyes.")
+            else:
+                st.dataframe(df_repetidos.drop(columns=res['cols_tec'], errors='ignore'), use_container_width=True, hide_index=True, height=300)
 
         # 4. FALTA DOCUMENTACIÓ
-        with st.expander("Revisar files sense FACTURA/REBUT"):
+        with st.expander("📄 Revisar files sense FACTURA/REBUT"):
             if df_falta_doc.empty:
-                st.info("Tots els cobraments tenen o bé Factura o bé Rebut.")
+                st.info("✅ Tots els cobraments tenen o bé Factura o bé Rebut.")
             else:
                 cols_amagar_doc = res['cols_tec'] + ['Estat_al_Principal', 'Es_Repetit', 'Estat_Documentacio'] + res['cols_ocult']
                 df_falta_doc_pantalla = df_falta_doc.drop(columns=cols_amagar_doc, errors='ignore')
-                styled_doc = df_falta_doc_pantalla.style.set_properties(**{'background-color': '#ffe6e6'}, subset=pd.IndexSlice[:, :])
-                st.dataframe(styled_doc, use_container_width=True, hide_index=True)
+                st.dataframe(df_falta_doc_pantalla.style.set_properties(**{'background-color': '#ffe6e6'}), use_container_width=True, hide_index=True, height=300)
 
 elif not archivo_principal or not archivo_pestana:
-    st.info("Si us plau, puja els dos fitxers Excel a la barra lateral per començar.")
+    st.info("👆 Si us plau, puja els dos fitxers Excel a la barra lateral per començar.")
 elif not hojas_seleccionadas:
-    st.warning("Si us plau, selecciona almenys una pestanya a la barra lateral.")
+    st.warning("⚠️ Si us plau, selecciona almenys una pestanya a la barra lateral.")
