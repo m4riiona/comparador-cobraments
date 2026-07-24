@@ -160,7 +160,7 @@ def apply_excel_formatting(original_file_bytes, output_df_bytes, num_original_co
 # INTERFÍCIE ORIGINAL (VISUALMENT MILLORADA)
 # ==========================================
 
-st.title("Comparador Financer")
+st.title("Comparador")
 
 st.sidebar.header("📂 Pujar Fitxers")
 archivo_principal = st.sidebar.file_uploader("1️⃣ Excel LLISTAT DE COBRAMENTS", type=['xlsx', 'xls'])
