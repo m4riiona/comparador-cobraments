@@ -196,7 +196,7 @@ if archivo_principal and archivo_pestana and hojas_seleccionadas:
 
         st.download_button("Descarregar Excel de Resultats", data=res['final_output'], file_name="Comparacio_Resultat.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
         # 1. FALTANTS PRINCIPAL -> PESTANYES
-        with st.expander("Revisar FALTEN (Estan a Ingressos però no a Cobraments)", expanded=False):
+        with st.expander("Revisar FALTEN Cobraments (Estan a Ingressos però no a Cobraments)", expanded=False):
             if df_faltan_prin.empty:
                 st.info("Tots els cobraments de Ingressos estan registrats al Listat de Cobraments.")
             else:
@@ -240,7 +240,7 @@ if archivo_principal and archivo_pestana and hojas_seleccionadas:
                                 st.info("No hi ha coincidències possibles a les pestanyes per aquest cobrament bancari.")
 
         # 2. FALTANTS PESTANYES -> PRINCIPAL
-        with st.expander("Revisar FALTEN (Estan a Cobraments però no a Ingressos)", expanded=False):
+        with st.expander("Revisar FALTEN Ingressos (Estan a Cobraments però no a Ingressos)", expanded=False):
             if df_faltan_pest.empty:
                 st.info("Tots els cobraments interns estan a Ingressos.")
             else:
